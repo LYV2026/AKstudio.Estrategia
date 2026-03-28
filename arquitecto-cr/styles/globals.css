@@ -1,0 +1,148 @@
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800&family=Lato:ital,wght@0,300;0,400;0,700;1,300&family=DM+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-primary:     #0D1635;
+  --bg-secondary:   #111E47;
+  --bg-card:        #162357;
+  --bg-card-hover:  #1C2B6B;
+  --border:         rgba(255,255,255,0.07);
+  --border-accent:  rgba(201,169,110,0.35);
+  --text-primary:   #F0F4FF;
+  --text-secondary: #A8B4D8;
+  --text-muted:     #5C6E9A;
+  --gold:           #C9A96E;
+  --gold-light:     #D9BF91;
+  --gold-dark:      #A8853D;
+  --navy:           #1C2B5E;
+  --accent-green:       #C9A96E;
+  --accent-green-light: #D9BF91;
+  --accent-gold:        #C9A96E;
+  --accent-blue:        #4A6CF7;
+  --accent-rose:        #E05470;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: 'Lato', sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: var(--bg-secondary); }
+::-webkit-scrollbar-thumb { background: #2A3D7A; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #3A52A0; }
+
+.font-display { font-family: 'Montserrat', sans-serif; }
+.font-mono    { font-family: 'DM Mono', monospace; }
+
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.card:hover {
+  border-color: rgba(201,169,110,0.18);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.25);
+}
+
+.gradient-text {
+  background: linear-gradient(135deg, #D9BF91, #C9A96E);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.score-high   { color: #C9A96E; background: rgba(201,169,110,0.12); }
+.score-medium { color: #7BA7E0; background: rgba(123,167,224,0.12); }
+.score-low    { color: #E05470; background: rgba(224,84,112,0.12); }
+
+.recharts-default-tooltip {
+  background: #162357 !important;
+  border: 1px solid rgba(201,169,110,0.25) !important;
+  border-radius: 8px !important;
+  font-family: 'Lato', sans-serif !important;
+  font-size: 13px !important;
+}
+.recharts-cartesian-axis-tick text { fill: #5C6E9A; font-size: 12px; }
+.recharts-legend-item-text { color: #A8B4D8 !important; font-size: 12px; }
+
+.input-field {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-family: 'Lato', sans-serif;
+  transition: border-color 0.2s;
+}
+.input-field:focus { outline: none; border-color: var(--gold); }
+.input-field option { background: #162357; }
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.data-table { width: 100%; border-collapse: collapse; }
+.data-table th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.data-table td {
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.data-table tbody tr:hover { background: rgba(201,169,110,0.04); }
+
+input[type=range] {
+  -webkit-appearance: none;
+  width: 100%; height: 4px;
+  border-radius: 2px;
+  background: #1C2B6B;
+  outline: none;
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: var(--gold);
+  cursor: pointer;
+}
+
+@keyframes fadeIn  { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slideUp { from { transform: translateY(16px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+.animate-fade-in  { animation: fadeIn  0.4s ease-out; }
+.animate-slide-up { animation: slideUp 0.4s ease-out; }
+
+.spinner {
+  border: 2px solid rgba(255,255,255,0.1);
+  border-top-color: var(--gold);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
