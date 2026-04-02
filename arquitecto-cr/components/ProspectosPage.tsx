@@ -1,18 +1,12 @@
 // components/ProspectosPage.tsx
-import React, { useState, useRef } from 'react'
-import { Lead } from '../types'
-import { addLead, deleteLead, updateLead, getLeads, exportToCSV } from '../lib/store'
+import React, { useState, useRef, useEffect } from 'react'
+import { supabase } from '../lib/supabase'
 import { PageHeader } from './Layout'
 import Papa from 'papaparse'
 
 const ETAPAS = ['Nuevo', 'Contactado', 'En conversación', 'Propuesta enviada', 'Cerrado', 'Descartado']
 const TIPOS_LEAD = ['Inversionista Airbnb', 'Dueño de lote', 'Desarrollador', 'Comerciante', 'Familia', 'Segunda residencia', 'Promotor']
-const FUENTES = ['Referido', 'Instagram', 'Facebook', 'Google', 'WhatsApp', 'LinkedIn', 'Feria/Evento', 'Portal inmobiliario', 'Municipalidad', 'Otro']
-
-const EMPTY_FORM = {
-  nombre: '', empresa: '', tipoLead: TIPOS_LEAD[0], ubicacion: '',
-  fuente: FUENTES[0], telefono: '', email: '', instagram: '', etapa: 'Nuevo', notas: '', nicho: '',
-}
+const FUENTES = ['Referido', 'Instagram', 'Facebook', 'Google', 'WhatsApp', 'LinkedIn', 'Feria/Evento', 'Portal inmobiliario', 'Municipalidad', 'Otro', 'Catastro Landing', 'ROI Landing', 'Proyecto Landing']
 
 const ETAPA_COLORS: Record<string, string> = {
   'Nuevo': '#94a3b8',
@@ -21,6 +15,12 @@ const ETAPA_COLORS: Record<string, string> = {
   'Propuesta enviada': '#a78bfa',
   'Cerrado': '#34d399',
   'Descartado': '#f87171',
+}
+
+const LANDING_COLORS: Record<string, string> = {
+  'catastro': '#60a5fa',
+  'roi': '#f59e0b',
+  'proyecto': '#34d399',
 }
 
 const PROSP_SOURCES = [
@@ -36,8 +36,33 @@ const PROSP_SOURCES = [
   { icon: '🤝', name: 'Referidos', desc: 'Red de notarios, abogados, ferreterías y proveedores de materiales' },
 ]
 
+type Prospect = {
+  id: string
+  created_at: string
+  name: string
+  email: string
+  phone: string
+  landing: string
+  source: string
+  location: string
+  project_type: string
+  budget_range: string
+  has_land: string
+  interest_type: string
+  plano_number: string
+  stage: string
+  notes: string
+}
+
+const EMPTY_FORM = {
+  name: '', email: '', phone: '', location: '',
+  source: FUENTES[0], stage: 'Nuevo', notes: '',
+  project_type: '', landing: 'manual',
+}
+
 export default function ProspectosPage() {
-  const [leads, setLeads] = useState<Lead[]>(() => getLeads())
+  const [leads, setLeads] = useState<Prospect[]>([])
+  const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({ ...EMPTY_FORM })
   const [editId, setEditId] = useState<string | null>(null)
@@ -45,69 +70,105 @@ export default function ProspectosPage() {
   const [filterTipo, setFilterTipo] = useState('')
   const [search, setSearch] = useState('')
   const [tab, setTab] = useState<'leads' | 'fuentes'>('leads')
+  const [saving, setSaving] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  const refresh = () => setLeads(getLeads())
+  useEffect(() => { fetchLeads() }, [])
 
-  function handleSubmit() {
-    if (!form.nombre.trim()) return
+  async function fetchLeads() {
+    setLoading(true)
+    const { data, error } = await supabase
+      .from('prospects')
+      .select('*')
+      .order('created_at', { ascending: false })
+    if (!error && data) setLeads(data)
+    setLoading(false)
+  }
+
+  async function handleSubmit() {
+    if (!form.name.trim()) return
+    setSaving(true)
     if (editId) {
-      updateLead(editId, form)
+      await supabase.from('prospects').update({
+        stage: form.stage,
+        notes: form.notes,
+        source: form.source,
+        location: form.location,
+        project_type: form.project_type,
+      }).eq('id', editId)
     } else {
-      addLead(form)
+      await supabase.from('prospects').insert([{
+        name: form.name,
+        email: form.email,
+        phone: form.phone,
+        location: form.location,
+        source: form.source,
+        landing: form.landing,
+        stage: form.stage,
+        notes: form.notes,
+        project_type: form.project_type,
+      }])
     }
-    refresh()
+    setSaving(false)
     setForm({ ...EMPTY_FORM })
     setEditId(null)
     setShowForm(false)
+    fetchLeads()
   }
 
-  function handleEdit(lead: Lead) {
+  function handleEdit(lead: Prospect) {
     setForm({
-      nombre: lead.nombre, empresa: lead.empresa || '', tipoLead: lead.tipoLead,
-      ubicacion: lead.ubicacion, fuente: lead.fuente, telefono: lead.telefono || '',
-      email: lead.email || '', instagram: lead.instagram || '', etapa: lead.etapa,
-      notas: lead.notas || '', nicho: lead.nicho || '',
+      name: lead.name,
+      email: lead.email || '',
+      phone: lead.phone || '',
+      location: lead.location || '',
+      source: lead.source || FUENTES[0],
+      stage: lead.stage,
+      notes: lead.notes || '',
+      project_type: lead.project_type || '',
+      landing: lead.landing || 'manual',
     })
     setEditId(lead.id)
     setShowForm(true)
   }
 
-  function handleDelete(id: string) {
-    if (confirm('¿Eliminar este prospecto?')) { deleteLead(id); refresh() }
+  async function handleDelete(id: string) {
+    if (!confirm('¿Eliminar este prospecto?')) return
+    await supabase.from('prospects').delete().eq('id', id)
+    fetchLeads()
   }
 
-  function handleCSV(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    Papa.parse(file, {
-      header: true,
-      complete: (results) => {
-        results.data.forEach((row: any) => {
-          if (!row.nombre && !row.Nombre) return
-          addLead({
-            nombre: row.nombre || row.Nombre || '',
-            empresa: row.empresa || row.Empresa || '',
-            tipoLead: row.tipoLead || row.tipo_lead || TIPOS_LEAD[0],
-            ubicacion: row.ubicacion || row.Ubicación || '',
-            fuente: row.fuente || row.Fuente || FUENTES[0],
-            telefono: row.telefono || row.Teléfono || '',
-            email: row.email || row.Email || '',
-            instagram: row.instagram || row.Instagram || '',
-            etapa: row.etapa || row.Etapa || 'Nuevo',
-            notas: row.notas || row.Notas || '',
-            nicho: row.nicho || row.Nicho || '',
-          })
-        })
-        refresh()
-      }
-    })
+  function exportCSV() {
+    const rows = filtered.map(l => ({
+      Nombre: l.name,
+      Email: l.email,
+      Teléfono: l.phone,
+      Ubicación: l.location,
+      Landing: l.landing,
+      Fuente: l.source,
+      'Tipo proyecto': l.project_type,
+      Presupuesto: l.budget_range,
+      Lote: l.has_land,
+      Etapa: l.stage,
+      Notas: l.notes,
+      Fecha: new Date(l.created_at).toLocaleDateString('es-CR'),
+    }))
+    const headers = Object.keys(rows[0] || {}).join(',')
+    const csv = [headers, ...rows.map(r => Object.values(r).map(v => `"${(v || '').toString().replace(/"/g, '""')}"`).join(','))].join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `prospectos-akstudio-${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
   }
 
   const filtered = leads.filter(l => {
-    if (filterEtapa && l.etapa !== filterEtapa) return false
-    if (filterTipo && l.tipoLead !== filterTipo) return false
-    if (search && !l.nombre.toLowerCase().includes(search.toLowerCase()) && !l.ubicacion.toLowerCase().includes(search.toLowerCase())) return false
+    if (filterEtapa && l.stage !== filterEtapa) return false
+    if (filterTipo && l.landing !== filterTipo) return false
+    if (search && !l.name?.toLowerCase().includes(search.toLowerCase()) &&
+        !l.email?.toLowerCase().includes(search.toLowerCase()) &&
+        !l.location?.toLowerCase().includes(search.toLowerCase())) return false
     return true
   })
 
@@ -115,8 +176,8 @@ export default function ProspectosPage() {
     <div style={{ padding: '32px 36px' }} className="animate-fade-in">
       <PageHeader
         title="Gestión de Prospectos"
-        subtitle="Organizá tus leads de forma ética y práctica · Sin scraping automático"
-        badge="CRM Básico"
+        subtitle="Leads captados automáticamente desde las landing pages · AK Studio"
+        badge="CRM · Supabase"
       />
 
       {/* Tabs */}
@@ -140,7 +201,7 @@ export default function ProspectosPage() {
           <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', marginBottom: 20, flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <label style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Buscar</label>
-              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Nombre o ubicación..." className="input-field" style={{ padding: '7px 10px', fontSize: 13, width: 180 }} />
+              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Nombre, email o ubicación..." className="input-field" style={{ padding: '7px 10px', fontSize: 13, width: 200 }} />
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <label style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Etapa</label>
@@ -150,18 +211,20 @@ export default function ProspectosPage() {
               </select>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <label style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Tipo</label>
+              <label style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Landing</label>
               <select value={filterTipo} onChange={e => setFilterTipo(e.target.value)} className="input-field" style={{ padding: '7px 10px', fontSize: 13 }}>
-                <option value="">Todos</option>
-                {TIPOS_LEAD.map(t => <option key={t} value={t}>{t}</option>)}
+                <option value="">Todas</option>
+                <option value="catastro">Catastro</option>
+                <option value="roi">ROI Airbnb</option>
+                <option value="proyecto">Proyecto</option>
+                <option value="manual">Manual</option>
               </select>
             </div>
             <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-              <input type="file" accept=".csv" ref={fileRef} onChange={handleCSV} style={{ display: 'none' }} />
-              <button onClick={() => fileRef.current?.click()} style={{ padding: '8px 14px', borderRadius: 8, background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer' }}>
-                ↑ Importar CSV
+              <button onClick={fetchLeads} style={{ padding: '8px 14px', borderRadius: 8, background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer' }}>
+                ↺ Actualizar
               </button>
-              <button onClick={() => exportToCSV(filtered.map(l => ({ Nombre: l.nombre, Empresa: l.empresa, Tipo: l.tipoLead, Ubicación: l.ubicacion, Fuente: l.fuente, Teléfono: l.telefono, Email: l.email, Instagram: l.instagram, Etapa: l.etapa, Notas: l.notas })), 'prospectos_cr.csv')} style={{ padding: '8px 14px', borderRadius: 8, background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer' }}>
+              <button onClick={exportCSV} style={{ padding: '8px 14px', borderRadius: 8, background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer' }}>
                 ↓ Exportar CSV
               </button>
               <button onClick={() => { setForm({ ...EMPTY_FORM }); setEditId(null); setShowForm(!showForm) }} style={{ padding: '8px 16px', borderRadius: 8, background: 'var(--accent-green)', border: 'none', color: '#000', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
@@ -174,16 +237,15 @@ export default function ProspectosPage() {
           {showForm && (
             <div className="card animate-slide-up" style={{ padding: 20, marginBottom: 20 }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 16 }}>
-                {editId ? 'Editar prospecto' : 'Nuevo prospecto'}
+                {editId ? 'Editar prospecto' : 'Nuevo prospecto manual'}
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
                 {[
-                  { key: 'nombre', label: 'Nombre *', type: 'text' },
-                  { key: 'empresa', label: 'Empresa', type: 'text' },
-                  { key: 'ubicacion', label: 'Ubicación', type: 'text' },
-                  { key: 'telefono', label: 'Teléfono', type: 'text' },
+                  { key: 'name', label: 'Nombre *', type: 'text' },
                   { key: 'email', label: 'Email', type: 'email' },
-                  { key: 'instagram', label: 'Instagram', type: 'text' },
+                  { key: 'phone', label: 'Teléfono', type: 'text' },
+                  { key: 'location', label: 'Ubicación', type: 'text' },
+                  { key: 'project_type', label: 'Tipo de proyecto', type: 'text' },
                 ].map(field => (
                   <div key={field.key} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                     <label style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{field.label}</label>
@@ -197,9 +259,8 @@ export default function ProspectosPage() {
                   </div>
                 ))}
                 {[
-                  { key: 'tipoLead', label: 'Tipo de lead', options: TIPOS_LEAD },
-                  { key: 'fuente', label: 'Fuente', options: FUENTES },
-                  { key: 'etapa', label: 'Etapa', options: ETAPAS },
+                  { key: 'source', label: 'Fuente', options: FUENTES },
+                  { key: 'stage', label: 'Etapa', options: ETAPAS },
                 ].map(field => (
                   <div key={field.key} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                     <label style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{field.label}</label>
@@ -210,12 +271,12 @@ export default function ProspectosPage() {
                 ))}
                 <div style={{ gridColumn: '1 / -1', display: 'flex', flexDirection: 'column', gap: 4 }}>
                   <label style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Notas</label>
-                  <textarea value={form.notas} onChange={e => setForm(f => ({ ...f, notas: e.target.value }))} className="input-field" style={{ padding: '7px 10px', fontSize: 13, minHeight: 64, resize: 'vertical' }} />
+                  <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} className="input-field" style={{ padding: '7px 10px', fontSize: 13, minHeight: 64, resize: 'vertical' }} />
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
-                <button onClick={handleSubmit} style={{ padding: '9px 20px', borderRadius: 8, background: 'var(--accent-green)', border: 'none', color: '#000', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
-                  {editId ? 'Guardar cambios' : 'Agregar lead'}
+                <button onClick={handleSubmit} disabled={saving} style={{ padding: '9px 20px', borderRadius: 8, background: 'var(--accent-green)', border: 'none', color: '#000', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                  {saving ? 'Guardando...' : editId ? 'Guardar cambios' : 'Agregar lead'}
                 </button>
                 <button onClick={() => { setShowForm(false); setEditId(null) }} style={{ padding: '9px 16px', borderRadius: 8, background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)', fontSize: 12, cursor: 'pointer' }}>
                   Cancelar
@@ -224,70 +285,85 @@ export default function ProspectosPage() {
             </div>
           )}
 
-          {/* Leads table */}
+          {/* Table */}
           <div className="card" style={{ overflow: 'auto' }}>
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Nombre</th>
-                  <th>Empresa</th>
-                  <th>Tipo</th>
-                  <th>Ubicación</th>
-                  <th>Fuente</th>
-                  <th>Contacto</th>
-                  <th>Etapa</th>
-                  <th>Notas</th>
-                  <th>Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.length === 0 ? (
+            {loading ? (
+              <div style={{ textAlign: 'center', padding: '48px', color: 'var(--text-muted)', fontSize: 14 }}>
+                Cargando prospectos...
+              </div>
+            ) : (
+              <table className="data-table">
+                <thead>
                   <tr>
-                    <td colSpan={9} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
-                      {leads.length === 0 ? 'Todavía no hay prospectos. Agregá el primero →' : 'No hay resultados con los filtros aplicados.'}
-                    </td>
+                    <th>Nombre</th>
+                    <th>Email</th>
+                    <th>Teléfono</th>
+                    <th>Landing</th>
+                    <th>Ubicación</th>
+                    <th>Etapa</th>
+                    <th>Notas</th>
+                    <th>Fecha</th>
+                    <th>Acciones</th>
                   </tr>
-                ) : filtered.map(l => (
-                  <tr key={l.id}>
-                    <td style={{ fontWeight: 600 }}>{l.nombre}</td>
-                    <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{l.empresa || '—'}</td>
-                    <td>
-                      <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 999, background: 'rgba(255,255,255,0.06)', color: 'var(--text-secondary)' }}>
-                        {l.tipoLead}
-                      </span>
-                    </td>
-                    <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{l.ubicacion}</td>
-                    <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{l.fuente}</td>
-                    <td style={{ fontSize: 12 }}>
-                      {l.telefono && <div>{l.telefono}</div>}
-                      {l.email && <div style={{ color: 'var(--text-muted)' }}>{l.email}</div>}
-                    </td>
-                    <td>
-                      <span style={{
-                        fontSize: 11, padding: '2px 8px', borderRadius: 4, fontWeight: 700,
-                        background: `${ETAPA_COLORS[l.etapa]}18`,
-                        color: ETAPA_COLORS[l.etapa] || '#94a3b8',
-                      }}>
-                        {l.etapa}
-                      </span>
-                    </td>
-                    <td style={{ fontSize: 12, color: 'var(--text-muted)', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {l.notas || '—'}
-                    </td>
-                    <td>
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        <button onClick={() => handleEdit(l)} style={{ padding: '3px 8px', borderRadius: 4, fontSize: 11, background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)', cursor: 'pointer' }}>Editar</button>
-                        <button onClick={() => handleDelete(l.id)} style={{ padding: '3px 8px', borderRadius: 4, fontSize: 11, background: 'transparent', border: '1px solid rgba(248,113,113,0.3)', color: '#f87171', cursor: 'pointer' }}>✕</button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {filtered.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                        {leads.length === 0 ? 'Todavía no hay prospectos. Los leads de las landing pages aparecerán aquí automáticamente.' : 'No hay resultados con los filtros aplicados.'}
+                      </td>
+                    </tr>
+                  ) : filtered.map(l => (
+                    <tr key={l.id}>
+                      <td style={{ fontWeight: 600 }}>{l.name}</td>
+                      <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{l.email || '—'}</td>
+                      <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{l.phone || '—'}</td>
+                      <td>
+                        {l.landing ? (
+                          <span style={{
+                            fontSize: 11, padding: '2px 8px', borderRadius: 4, fontWeight: 700,
+                            background: `${LANDING_COLORS[l.landing] || '#94a3b8'}18`,
+                            color: LANDING_COLORS[l.landing] || '#94a3b8',
+                          }}>
+                            {l.landing}
+                          </span>
+                        ) : '—'}
+                      </td>
+                      <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{l.location || '—'}</td>
+                      <td>
+                        <span style={{
+                          fontSize: 11, padding: '2px 8px', borderRadius: 4, fontWeight: 700,
+                          background: `${ETAPA_COLORS[l.stage] || '#94a3b8'}18`,
+                          color: ETAPA_COLORS[l.stage] || '#94a3b8',
+                        }}>
+                          {l.stage}
+                        </span>
+                      </td>
+                      <td style={{ fontSize: 12, color: 'var(--text-muted)', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {l.notes || '—'}
+                      </td>
+                      <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                        {new Date(l.created_at).toLocaleDateString('es-CR')}
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button onClick={() => handleEdit(l)} style={{ padding: '3px 8px', borderRadius: 4, fontSize: 11, background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)', cursor: 'pointer' }}>Editar</button>
+                          <button onClick={() => handleDelete(l.id)} style={{ padding: '3px 8px', borderRadius: 4, fontSize: 11, background: 'transparent', border: '1px solid rgba(248,113,113,0.3)', color: '#f87171', cursor: 'pointer' }}>✕</button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            {!loading && filtered.length > 0 && (
+              <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', fontSize: 12, color: 'var(--text-muted)' }}>
+                Mostrando {filtered.length} de {leads.length} prospectos
+              </div>
+            )}
           </div>
         </>
       ) : (
-        /* Fuentes de prospección */
         <div>
           <div style={{ fontSize: 14, color: 'var(--text-secondary)', marginBottom: 20, lineHeight: 1.6 }}>
             Estas son fuentes éticas para encontrar prospectos manualmente. La app <strong style={{ color: 'var(--text-primary)' }}>no realiza scraping ni recolección automática</strong> de datos personales.
