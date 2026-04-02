@@ -1,12 +1,15 @@
 // components/ProspectosPage.tsx
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
+import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabase'
 import { PageHeader } from './Layout'
-import Papa from 'papaparse'
 
 const ETAPAS = ['Nuevo', 'Contactado', 'En conversación', 'Propuesta enviada', 'Cerrado', 'Descartado']
-const TIPOS_LEAD = ['Inversionista Airbnb', 'Dueño de lote', 'Desarrollador', 'Comerciante', 'Familia', 'Segunda residencia', 'Promotor']
-const FUENTES = ['Referido', 'Instagram', 'Facebook', 'Google', 'WhatsApp', 'LinkedIn', 'Feria/Evento', 'Portal inmobiliario', 'Municipalidad', 'Otro', 'Catastro Landing', 'ROI Landing', 'Proyecto Landing']
+const FUENTES = [
+  'Referido', 'Instagram', 'Facebook', 'Google', 'WhatsApp', 'LinkedIn',
+  'Feria/Evento', 'Portal inmobiliario', 'Municipalidad', 'Otro',
+  'Catastro Landing', 'ROI Landing', 'Proyecto Landing',
+]
 
 const ETAPA_COLORS: Record<string, string> = {
   'Nuevo': '#94a3b8',
@@ -15,6 +18,15 @@ const ETAPA_COLORS: Record<string, string> = {
   'Propuesta enviada': '#a78bfa',
   'Cerrado': '#34d399',
   'Descartado': '#f87171',
+}
+
+const ETAPA_FILL: Record<string, string> = {
+  'Nuevo': 'DBEAFE',
+  'Contactado': 'FEF3C7',
+  'En conversación': 'EDE9FE',
+  'Propuesta enviada': 'FFEDD5',
+  'Cerrado': 'D1FAE5',
+  'Descartado': 'FEE2E2',
 }
 
 const LANDING_COLORS: Record<string, string> = {
@@ -71,7 +83,6 @@ export default function ProspectosPage() {
   const [search, setSearch] = useState('')
   const [tab, setTab] = useState<'leads' | 'fuentes'>('leads')
   const [saving, setSaving] = useState(false)
-  const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => { fetchLeads() }, [])
 
@@ -89,13 +100,16 @@ export default function ProspectosPage() {
     if (!form.name.trim()) return
     setSaving(true)
     if (editId) {
-      await supabase.from('prospects').update({
-        stage: form.stage,
-        notes: form.notes,
-        source: form.source,
-        location: form.location,
-        project_type: form.project_type,
-      }).eq('id', editId)
+      await supabase
+        .from('prospects')
+        .update({
+          stage: form.stage,
+          notes: form.notes,
+          source: form.source,
+          location: form.location,
+          project_type: form.project_type,
+        })
+        .eq('id', editId)
     } else {
       await supabase.from('prospects').insert([{
         name: form.name,
@@ -138,37 +152,117 @@ export default function ProspectosPage() {
     fetchLeads()
   }
 
-  function exportCSV() {
-    const rows = filtered.map(l => ({
-      Nombre: l.name,
-      Email: l.email,
-      Teléfono: l.phone,
-      Ubicación: l.location,
-      Landing: l.landing,
-      Fuente: l.source,
-      'Tipo proyecto': l.project_type,
-      Presupuesto: l.budget_range,
-      Lote: l.has_land,
-      Etapa: l.stage,
-      Notas: l.notes,
-      Fecha: new Date(l.created_at).toLocaleDateString('es-CR'),
-    }))
-    const headers = Object.keys(rows[0] || {}).join(',')
-    const csv = [headers, ...rows.map(r => Object.values(r).map(v => `"${(v || '').toString().replace(/"/g, '""')}"`).join(','))].join('\n')
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `prospectos-akstudio-${new Date().toISOString().slice(0, 10)}.csv`
-    a.click()
+  function exportExcel() {
+    const headers = [
+      'Nombre', 'Email', 'Teléfono', 'Etapa', 'Landing',
+      'Fuente', 'Tipo proyecto', 'Ubicación', 'Notas', 'Fecha',
+    ]
+
+    const rows = [...filtered]
+      .sort((a, b) => a.stage.localeCompare(b.stage))
+      .map(l => [
+        l.name || '',
+        l.email || '',
+        l.phone || '',
+        l.stage || '',
+        l.landing || '',
+        l.source || '',
+        l.project_type || '',
+        l.location || '',
+        l.notes || '',
+        new Date(l.created_at).toLocaleDateString('es-CR'),
+      ])
+
+    const wb = XLSX.utils.book_new()
+
+    // Sheet 1: Prospectos
+    const wsData = [headers, ...rows]
+    const ws = XLSX.utils.aoa_to_sheet(wsData)
+
+    ws['!cols'] = [
+      { wch: 28 }, { wch: 32 }, { wch: 14 }, { wch: 18 },
+      { wch: 12 }, { wch: 28 }, { wch: 20 }, { wch: 22 },
+      { wch: 50 }, { wch: 12 },
+    ]
+
+    headers.forEach((_, i) => {
+      const ref = XLSX.utils.encode_cell({ r: 0, c: i })
+      if (ws[ref]) {
+        ws[ref].s = {
+          font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 11, name: 'Calibri' },
+          fill: { patternType: 'solid', fgColor: { rgb: '06225F' } },
+          alignment: { horizontal: 'center', vertical: 'center' },
+        }
+      }
+    })
+
+    rows.forEach((row, rowIdx) => {
+      const etapa = row[3] || ''
+      const fillColor = ETAPA_FILL[etapa] || 'F7F7F5'
+      headers.forEach((_, colIdx) => {
+        const ref = XLSX.utils.encode_cell({ r: rowIdx + 1, c: colIdx })
+        if (ws[ref]) {
+          ws[ref].s = {
+            fill: { patternType: 'solid', fgColor: { rgb: fillColor } },
+            font: { name: 'Calibri', sz: 10, bold: colIdx === 0 },
+            alignment: { vertical: 'center', wrapText: colIdx === 8 },
+          }
+        }
+      })
+    })
+
+    // Sheet 2: Resumen
+    const summaryData = [
+      ['Etapa', 'Total', '% del total'],
+      ...ETAPAS.map(s => {
+        const count = leads.filter(l => l.stage === s).length
+        const pct = leads.length > 0 ? `${(count / leads.length * 100).toFixed(1)}%` : '0%'
+        return [s, count, pct]
+      }),
+      [],
+      [`Total prospectos: ${leads.length}`, '', ''],
+    ]
+    const ws2 = XLSX.utils.aoa_to_sheet(summaryData)
+    ws2['!cols'] = [{ wch: 25 }, { wch: 12 }, { wch: 15 }]
+
+    ;['A1', 'B1', 'C1'].forEach(ref => {
+      if (ws2[ref]) {
+        ws2[ref].s = {
+          font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 11 },
+          fill: { patternType: 'solid', fgColor: { rgb: '06225F' } },
+          alignment: { horizontal: 'center' },
+        }
+      }
+    })
+
+    ETAPAS.forEach((s, i) => {
+      const fillColor = ETAPA_FILL[s] || 'F7F7F5'
+      ;['A', 'B', 'C'].forEach(col => {
+        const ref = `${col}${i + 2}`
+        if (ws2[ref]) {
+          ws2[ref].s = {
+            fill: { patternType: 'solid', fgColor: { rgb: fillColor } },
+            font: { name: 'Calibri', sz: 10 },
+            alignment: { horizontal: col === 'A' ? 'left' : 'center' },
+          }
+        }
+      })
+    })
+
+    XLSX.utils.book_append_sheet(wb, ws, 'Prospectos AK Studio')
+    XLSX.utils.book_append_sheet(wb, ws2, 'Resumen por Etapa')
+    XLSX.writeFile(wb, `prospectos-akstudio-${new Date().toISOString().slice(0, 10)}.xlsx`)
   }
 
   const filtered = leads.filter(l => {
     if (filterEtapa && l.stage !== filterEtapa) return false
     if (filterTipo && l.landing !== filterTipo) return false
-    if (search && !l.name?.toLowerCase().includes(search.toLowerCase()) &&
-        !l.email?.toLowerCase().includes(search.toLowerCase()) &&
-        !l.location?.toLowerCase().includes(search.toLowerCase())) return false
+    if (
+      search &&
+      !l.name?.toLowerCase().includes(search.toLowerCase()) &&
+      !l.email?.toLowerCase().includes(search.toLowerCase()) &&
+      !l.location?.toLowerCase().includes(search.toLowerCase())
+    ) return false
     return true
   })
 
@@ -186,12 +280,22 @@ export default function ProspectosPage() {
           { id: 'leads', label: `Mis Leads (${leads.length})` },
           { id: 'fuentes', label: '🔍 Dónde buscar prospectos' },
         ].map(t => (
-          <button key={t.id} onClick={() => setTab(t.id as any)} style={{
-            padding: '10px 18px', background: 'transparent', border: 'none',
-            borderBottom: `2px solid ${tab === t.id ? 'var(--accent-green)' : 'transparent'}`,
-            color: tab === t.id ? 'var(--accent-green)' : 'var(--text-muted)',
-            fontSize: 13, fontWeight: tab === t.id ? 700 : 400, cursor: 'pointer',
-          }}>{t.label}</button>
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id as any)}
+            style={{
+              padding: '10px 18px',
+              background: 'transparent',
+              border: 'none',
+              borderBottom: `2px solid ${tab === t.id ? 'var(--accent-green)' : 'transparent'}`,
+              color: tab === t.id ? 'var(--accent-green)' : 'var(--text-muted)',
+              fontSize: 13,
+              fontWeight: tab === t.id ? 700 : 400,
+              cursor: 'pointer',
+            }}
+          >
+            {t.label}
+          </button>
         ))}
       </div>
 
@@ -200,19 +304,43 @@ export default function ProspectosPage() {
           {/* Actions bar */}
           <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', marginBottom: 20, flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <label style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Buscar</label>
-              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Nombre, email o ubicación..." className="input-field" style={{ padding: '7px 10px', fontSize: 13, width: 200 }} />
+              <label style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                Buscar
+              </label>
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Nombre, email o ubicación..."
+                className="input-field"
+                style={{ padding: '7px 10px', fontSize: 13, width: 200 }}
+              />
             </div>
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <label style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Etapa</label>
-              <select value={filterEtapa} onChange={e => setFilterEtapa(e.target.value)} className="input-field" style={{ padding: '7px 10px', fontSize: 13 }}>
+              <label style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                Etapa
+              </label>
+              <select
+                value={filterEtapa}
+                onChange={e => setFilterEtapa(e.target.value)}
+                className="input-field"
+                style={{ padding: '7px 10px', fontSize: 13 }}
+              >
                 <option value="">Todas</option>
                 {ETAPAS.map(e => <option key={e} value={e}>{e}</option>)}
               </select>
             </div>
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <label style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Landing</label>
-              <select value={filterTipo} onChange={e => setFilterTipo(e.target.value)} className="input-field" style={{ padding: '7px 10px', fontSize: 13 }}>
+              <label style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                Landing
+              </label>
+              <select
+                value={filterTipo}
+                onChange={e => setFilterTipo(e.target.value)}
+                className="input-field"
+                style={{ padding: '7px 10px', fontSize: 13 }}
+              >
                 <option value="">Todas</option>
                 <option value="catastro">Catastro</option>
                 <option value="roi">ROI Airbnb</option>
@@ -220,14 +348,24 @@ export default function ProspectosPage() {
                 <option value="manual">Manual</option>
               </select>
             </div>
+
             <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-              <button onClick={fetchLeads} style={{ padding: '8px 14px', borderRadius: 8, background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer' }}>
+              <button
+                onClick={fetchLeads}
+                style={{ padding: '8px 14px', borderRadius: 8, background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer' }}
+              >
                 ↺ Actualizar
               </button>
-              <button onClick={exportCSV} style={{ padding: '8px 14px', borderRadius: 8, background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer' }}>
-                ↓ Exportar CSV
+              <button
+                onClick={exportExcel}
+                style={{ padding: '8px 14px', borderRadius: 8, background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer' }}
+              >
+                ↓ Exportar Excel
               </button>
-              <button onClick={() => { setForm({ ...EMPTY_FORM }); setEditId(null); setShowForm(!showForm) }} style={{ padding: '8px 16px', borderRadius: 8, background: 'var(--accent-green)', border: 'none', color: '#000', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+              <button
+                onClick={() => { setForm({ ...EMPTY_FORM }); setEditId(null); setShowForm(!showForm) }}
+                style={{ padding: '8px 16px', borderRadius: 8, background: 'var(--accent-green)', border: 'none', color: '#000', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+              >
                 + Nuevo lead
               </button>
             </div>
@@ -248,7 +386,9 @@ export default function ProspectosPage() {
                   { key: 'project_type', label: 'Tipo de proyecto', type: 'text' },
                 ].map(field => (
                   <div key={field.key} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    <label style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{field.label}</label>
+                    <label style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                      {field.label}
+                    </label>
                     <input
                       type={field.type}
                       value={(form as any)[field.key]}
@@ -263,22 +403,43 @@ export default function ProspectosPage() {
                   { key: 'stage', label: 'Etapa', options: ETAPAS },
                 ].map(field => (
                   <div key={field.key} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    <label style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{field.label}</label>
-                    <select value={(form as any)[field.key]} onChange={e => setForm(f => ({ ...f, [field.key]: e.target.value }))} className="input-field" style={{ padding: '7px 10px', fontSize: 13 }}>
+                    <label style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                      {field.label}
+                    </label>
+                    <select
+                      value={(form as any)[field.key]}
+                      onChange={e => setForm(f => ({ ...f, [field.key]: e.target.value }))}
+                      className="input-field"
+                      style={{ padding: '7px 10px', fontSize: 13 }}
+                    >
                       {field.options.map(o => <option key={o} value={o}>{o}</option>)}
                     </select>
                   </div>
                 ))}
                 <div style={{ gridColumn: '1 / -1', display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <label style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Notas</label>
-                  <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} className="input-field" style={{ padding: '7px 10px', fontSize: 13, minHeight: 64, resize: 'vertical' }} />
+                  <label style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                    Notas
+                  </label>
+                  <textarea
+                    value={form.notes}
+                    onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+                    className="input-field"
+                    style={{ padding: '7px 10px', fontSize: 13, minHeight: 64, resize: 'vertical' }}
+                  />
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
-                <button onClick={handleSubmit} disabled={saving} style={{ padding: '9px 20px', borderRadius: 8, background: 'var(--accent-green)', border: 'none', color: '#000', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                <button
+                  onClick={handleSubmit}
+                  disabled={saving}
+                  style={{ padding: '9px 20px', borderRadius: 8, background: 'var(--accent-green)', border: 'none', color: '#000', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+                >
                   {saving ? 'Guardando...' : editId ? 'Guardar cambios' : 'Agregar lead'}
                 </button>
-                <button onClick={() => { setShowForm(false); setEditId(null) }} style={{ padding: '9px 16px', borderRadius: 8, background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)', fontSize: 12, cursor: 'pointer' }}>
+                <button
+                  onClick={() => { setShowForm(false); setEditId(null) }}
+                  style={{ padding: '9px 16px', borderRadius: 8, background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)', fontSize: 12, cursor: 'pointer' }}
+                >
                   Cancelar
                 </button>
               </div>
@@ -310,7 +471,9 @@ export default function ProspectosPage() {
                   {filtered.length === 0 ? (
                     <tr>
                       <td colSpan={9} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
-                        {leads.length === 0 ? 'Todavía no hay prospectos. Los leads de las landing pages aparecerán aquí automáticamente.' : 'No hay resultados con los filtros aplicados.'}
+                        {leads.length === 0
+                          ? 'Todavía no hay prospectos. Los leads de las landing pages aparecerán aquí automáticamente.'
+                          : 'No hay resultados con los filtros aplicados.'}
                       </td>
                     </tr>
                   ) : filtered.map(l => (
@@ -321,7 +484,10 @@ export default function ProspectosPage() {
                       <td>
                         {l.landing ? (
                           <span style={{
-                            fontSize: 11, padding: '2px 8px', borderRadius: 4, fontWeight: 700,
+                            fontSize: 11,
+                            padding: '2px 8px',
+                            borderRadius: 4,
+                            fontWeight: 700,
                             background: `${LANDING_COLORS[l.landing] || '#94a3b8'}18`,
                             color: LANDING_COLORS[l.landing] || '#94a3b8',
                           }}>
@@ -332,7 +498,10 @@ export default function ProspectosPage() {
                       <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{l.location || '—'}</td>
                       <td>
                         <span style={{
-                          fontSize: 11, padding: '2px 8px', borderRadius: 4, fontWeight: 700,
+                          fontSize: 11,
+                          padding: '2px 8px',
+                          borderRadius: 4,
+                          fontWeight: 700,
                           background: `${ETAPA_COLORS[l.stage] || '#94a3b8'}18`,
                           color: ETAPA_COLORS[l.stage] || '#94a3b8',
                         }}>
@@ -347,8 +516,18 @@ export default function ProspectosPage() {
                       </td>
                       <td>
                         <div style={{ display: 'flex', gap: 6 }}>
-                          <button onClick={() => handleEdit(l)} style={{ padding: '3px 8px', borderRadius: 4, fontSize: 11, background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)', cursor: 'pointer' }}>Editar</button>
-                          <button onClick={() => handleDelete(l.id)} style={{ padding: '3px 8px', borderRadius: 4, fontSize: 11, background: 'transparent', border: '1px solid rgba(248,113,113,0.3)', color: '#f87171', cursor: 'pointer' }}>✕</button>
+                          <button
+                            onClick={() => handleEdit(l)}
+                            style={{ padding: '3px 8px', borderRadius: 4, fontSize: 11, background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)', cursor: 'pointer' }}
+                          >
+                            Editar
+                          </button>
+                          <button
+                            onClick={() => handleDelete(l.id)}
+                            style={{ padding: '3px 8px', borderRadius: 4, fontSize: 11, background: 'transparent', border: '1px solid rgba(248,113,113,0.3)', color: '#f87171', cursor: 'pointer' }}
+                          >
+                            ✕
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -366,11 +545,17 @@ export default function ProspectosPage() {
       ) : (
         <div>
           <div style={{ fontSize: 14, color: 'var(--text-secondary)', marginBottom: 20, lineHeight: 1.6 }}>
-            Estas son fuentes éticas para encontrar prospectos manualmente. La app <strong style={{ color: 'var(--text-primary)' }}>no realiza scraping ni recolección automática</strong> de datos personales.
+            Estas son fuentes éticas para encontrar prospectos manualmente. La app{' '}
+            <strong style={{ color: 'var(--text-primary)' }}>no realiza scraping ni recolección automática</strong>{' '}
+            de datos personales.
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
             {PROSP_SOURCES.map(s => (
-              <div key={s.name} className="card" style={{ padding: '16px 18px', display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+              <div
+                key={s.name}
+                className="card"
+                style={{ padding: '16px 18px', display: 'flex', gap: 14, alignItems: 'flex-start' }}
+              >
                 <div style={{ fontSize: 24, flexShrink: 0, width: 36, textAlign: 'center' }}>{s.icon}</div>
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>{s.name}</div>
