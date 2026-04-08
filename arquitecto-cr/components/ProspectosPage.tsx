@@ -75,6 +75,7 @@ const EMPTY_FORM = {
 export default function ProspectosPage() {
   const [leads, setLeads] = useState<Prospect[]>([])
   const [loading, setLoading] = useState(true)
+  const [newLeadAlert, setNewLeadAlert] = useState(false)
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({ ...EMPTY_FORM })
   const [editId, setEditId] = useState<string | null>(null)
@@ -84,7 +85,32 @@ export default function ProspectosPage() {
   const [tab, setTab] = useState<'leads' | 'fuentes'>('leads')
   const [saving, setSaving] = useState(false)
 
-  useEffect(() => { fetchLeads() }, [])
+  useEffect(() => {
+    fetchLeads()
+
+    // Suscripción en tiempo real — se actualiza automáticamente
+    const channel = supabase
+      .channel('prospects-realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'prospects' },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            // Mostrar alerta de nuevo lead
+            setNewLeadAlert(true)
+            setTimeout(() => setNewLeadAlert(false), 5000)
+          }
+          // Recargar la lista automáticamente
+          fetchLeads()
+        }
+      )
+      .subscribe()
+
+    // Limpiar la suscripción al desmontar el componente
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [])
 
   async function fetchLeads() {
     setLoading(true)
@@ -127,7 +153,6 @@ export default function ProspectosPage() {
     setForm({ ...EMPTY_FORM })
     setEditId(null)
     setShowForm(false)
-    fetchLeads()
   }
 
   function handleEdit(lead: Prospect) {
@@ -149,7 +174,6 @@ export default function ProspectosPage() {
   async function handleDelete(id: string) {
     if (!confirm('¿Eliminar este prospecto?')) return
     await supabase.from('prospects').delete().eq('id', id)
-    fetchLeads()
   }
 
   function exportExcel() {
@@ -174,8 +198,6 @@ export default function ProspectosPage() {
       ])
 
     const wb = XLSX.utils.book_new()
-
-    // Sheet 1: Prospectos
     const wsData = [headers, ...rows]
     const ws = XLSX.utils.aoa_to_sheet(wsData)
 
@@ -211,7 +233,6 @@ export default function ProspectosPage() {
       })
     })
 
-    // Sheet 2: Resumen
     const summaryData = [
       ['Etapa', 'Total', '% del total'],
       ...ETAPAS.map(s => {
@@ -224,30 +245,6 @@ export default function ProspectosPage() {
     ]
     const ws2 = XLSX.utils.aoa_to_sheet(summaryData)
     ws2['!cols'] = [{ wch: 25 }, { wch: 12 }, { wch: 15 }]
-
-    ;['A1', 'B1', 'C1'].forEach(ref => {
-      if (ws2[ref]) {
-        ws2[ref].s = {
-          font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 11 },
-          fill: { patternType: 'solid', fgColor: { rgb: '06225F' } },
-          alignment: { horizontal: 'center' },
-        }
-      }
-    })
-
-    ETAPAS.forEach((s, i) => {
-      const fillColor = ETAPA_FILL[s] || 'F7F7F5'
-      ;['A', 'B', 'C'].forEach(col => {
-        const ref = `${col}${i + 2}`
-        if (ws2[ref]) {
-          ws2[ref].s = {
-            fill: { patternType: 'solid', fgColor: { rgb: fillColor } },
-            font: { name: 'Calibri', sz: 10 },
-            alignment: { horizontal: col === 'A' ? 'left' : 'center' },
-          }
-        }
-      })
-    })
 
     XLSX.utils.book_append_sheet(wb, ws, 'Prospectos AK Studio')
     XLSX.utils.book_append_sheet(wb, ws2, 'Resumen por Etapa')
@@ -271,8 +268,28 @@ export default function ProspectosPage() {
       <PageHeader
         title="Gestión de Prospectos"
         subtitle="Leads captados automáticamente desde las landing pages · AK Studio"
-        badge="CRM · Supabase"
+        badge="CRM · Tiempo Real"
       />
+
+      {/* Alerta de nuevo lead en tiempo real */}
+      {newLeadAlert && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          background: 'rgba(52, 211, 153, 0.12)',
+          border: '1px solid rgba(52, 211, 153, 0.3)',
+          borderRadius: 8,
+          padding: '12px 20px',
+          marginBottom: 20,
+          fontSize: 14,
+          color: '#34d399',
+          fontWeight: 500,
+        }}>
+          <span style={{ fontSize: 18 }}>🔔</span>
+          ¡Nuevo prospecto recibido! La lista se actualizó automáticamente.
+        </div>
+      )}
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: 4, marginBottom: 24, borderBottom: '1px solid var(--border)' }}>
@@ -349,13 +366,26 @@ export default function ProspectosPage() {
               </select>
             </div>
 
-            <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-              <button
-                onClick={fetchLeads}
-                style={{ padding: '8px 14px', borderRadius: 8, background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer' }}
-              >
-                ↺ Actualizar
-              </button>
+            <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+              {/* Indicador de tiempo real */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: 11,
+                color: 'var(--text-muted)',
+                padding: '8px 12px',
+              }}>
+                <span style={{
+                  width: 7, height: 7,
+                  borderRadius: '50%',
+                  background: '#34d399',
+                  boxShadow: '0 0 0 2px rgba(52,211,153,0.2)',
+                  display: 'inline-block',
+                  animation: 'pulse 2s infinite',
+                }} />
+                En vivo
+              </div>
               <button
                 onClick={exportExcel}
                 style={{ padding: '8px 14px', borderRadius: 8, background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer' }}
@@ -472,7 +502,7 @@ export default function ProspectosPage() {
                     <tr>
                       <td colSpan={9} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
                         {leads.length === 0
-                          ? 'Todavía no hay prospectos. Los leads de las landing pages aparecerán aquí automáticamente.'
+                          ? 'Los leads de las landing pages aparecerán aquí automáticamente en tiempo real.'
                           : 'No hay resultados con los filtros aplicados.'}
                       </td>
                     </tr>
@@ -484,10 +514,7 @@ export default function ProspectosPage() {
                       <td>
                         {l.landing ? (
                           <span style={{
-                            fontSize: 11,
-                            padding: '2px 8px',
-                            borderRadius: 4,
-                            fontWeight: 700,
+                            fontSize: 11, padding: '2px 8px', borderRadius: 4, fontWeight: 700,
                             background: `${LANDING_COLORS[l.landing] || '#94a3b8'}18`,
                             color: LANDING_COLORS[l.landing] || '#94a3b8',
                           }}>
@@ -498,10 +525,7 @@ export default function ProspectosPage() {
                       <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{l.location || '—'}</td>
                       <td>
                         <span style={{
-                          fontSize: 11,
-                          padding: '2px 8px',
-                          borderRadius: 4,
-                          fontWeight: 700,
+                          fontSize: 11, padding: '2px 8px', borderRadius: 4, fontWeight: 700,
                           background: `${ETAPA_COLORS[l.stage] || '#94a3b8'}18`,
                           color: ETAPA_COLORS[l.stage] || '#94a3b8',
                         }}>
@@ -541,6 +565,13 @@ export default function ProspectosPage() {
               </div>
             )}
           </div>
+
+          <style>{`
+            @keyframes pulse {
+              0%, 100% { opacity: 1; }
+              50% { opacity: 0.4; }
+            }
+          `}</style>
         </>
       ) : (
         <div>
@@ -551,11 +582,7 @@ export default function ProspectosPage() {
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
             {PROSP_SOURCES.map(s => (
-              <div
-                key={s.name}
-                className="card"
-                style={{ padding: '16px 18px', display: 'flex', gap: 14, alignItems: 'flex-start' }}
-              >
+              <div key={s.name} className="card" style={{ padding: '16px 18px', display: 'flex', gap: 14, alignItems: 'flex-start' }}>
                 <div style={{ fontSize: 24, flexShrink: 0, width: 36, textAlign: 'center' }}>{s.icon}</div>
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>{s.name}</div>
